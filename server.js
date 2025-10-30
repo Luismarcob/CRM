@@ -1,6 +1,6 @@
 // server.js
 // Mini CRM + LOGIN BÁSICO (usuario: admin / pass: admin)
-// Basado en tu server actual
+// Versión con reconexión WA y watchdog
 "use strict";
 
 const express = require('express');
@@ -13,7 +13,7 @@ const qrcode = require('qrcode-terminal');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 const cors = require('cors');
-const cookieParser = require('cookie-parser'); // 👈 login
+const cookieParser = require('cookie-parser');
 
 // ---------- CONFIG LOGIN ----------
 const SESSION_SECRET = 'cambia-esto-por-algo-mas-largo';
@@ -245,30 +245,43 @@ function pushMessage(chatId, msg) {
 }
 const visibleChatsArray = () => Array.from(state.chats.values()).filter(c => !hiddenChats.has(c.id));
 
-// ---------- CLIENTE WHATSAPP ----------
+// ============ WHATSAPP CLIENT ============
+// 🔴 este es el punto crítico: cliente con reconexión
 const wa = new Client({
-  authStrategy: new LocalAuth({ clientId: 'crm-panel' }),
+  authStrategy: new LocalAuth({
+    // si usas Windows VPS y quieres una ruta fija, déjala así
+    dataPath: 'C:\\fastdata\\crm-auth',
+    clientId: 'crm-panel'
+  }),
   puppeteer: {
-    headless: false,
+    headless: false, // ⚠ más estable en Windows/VPS con escritorio
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-features=site-per-process',
+      '--disable-gpu',
+      '--window-size=1280,800'
     ],
-    timeout: 0,
-  },
+    defaultViewport: null,
+    timeout: 0
+  }
 });
+
+let reconnecting = false;
 
 wa.on('qr', (qr) => {
   console.log('\n📲 Escanea este QR en tu WhatsApp:');
   qrcode.generate(qr, { small: true });
   io.emit('qr', qr);
 });
+
 wa.on('authenticated', () => console.log('🔐 Autenticado.'));
 wa.on('auth_failure', (m) => console.error('❌ Falló autenticación:', m));
+
 wa.on('ready', async () => {
   console.log('✅ WhatsApp listo.');
+  reconnecting = false;
   io.emit('ready');
   setTimeout(async () => {
     try {
@@ -289,78 +302,47 @@ wa.on('ready', async () => {
   }, 1200);
 });
 
-async function sleepWait(ms) { return sleep(ms); }
-async function waitForChat(client, chatId, { tries = 12, delayMs = 300 } = {}) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const chat = await client.getChatById(chatId);
-      if (chat) return chat;
-    } catch {}
-    await sleep(delayMs);
-  }
-  throw new Error('Chat aún no disponible');
-}
+// ⚠️ reconexión más dura para evitar "Evaluation failed: b"
+// ⚠️ reconexión compatible con Windows (sin borrar archivos bloqueados)
+wa.on('disconnected', async (reason) => {
+  console.log('⚠️ Desconectado de WhatsApp:', reason);
+  if (reconnecting) return;
+  reconnecting = true;
 
-function findRule(rules = [], text = '') {
-  const s = String(text || '').trim();
-  for (const r of rules) {
-    if (!r) continue;
-    const type = (r.type || 'includes').toLowerCase();
-    const m = String(r.match || '');
+  // caso especial: LOGOUT
+  if (String(reason).toUpperCase().includes('LOGOUT')) {
+    // no hagas destroy aquí: en Windows da EBUSY
+    await sleep(3000);
+    console.log('♻️ LOGOUT detectado, re-inicializando sesión…');
     try {
-      if (type === 'equals' && s.toLowerCase() === m.toLowerCase()) return r;
-      if (type === 'includes' && s.toLowerCase().includes(m.toLowerCase())) return r;
-      if (type === 'regex') {
-        const re = new RegExp(m, 'i');
-        if (re.test(s)) return r;
-      }
-    } catch (e) {
-      console.error('Regla inválida:', r, e?.message || e);
+      await wa.initialize();
+    } catch (err) {
+      console.error('❌ Error al re-inicializar tras LOGOUT:', err?.message || err);
+      setTimeout(() => wa.initialize().catch(()=>{}), 5000);
+    } finally {
+      reconnecting = false;
     }
+    return;
   }
-  return null;
-}
-async function runActions(client, chatId, actions = []) {
-  const chat = await client.getChatById(chatId);
-  for (const a of (actions || [])) {
-    if (!a || !a.do) continue;
-    if (a.do === 'delay') {
-      await sleep(Number(a.ms || 0));
-      continue;
-    }
-    if (a.do === 'typing') {
-      try {
-        await chat.sendStateTyping();
-        await sleep(Number(a.ms || 800));
-        await chat.clearState();
-      } catch {}
-      continue;
-    }
-    if (a.do === 'text') {
-      await client.sendMessage(chatId, String(a.text || ''));
-      continue;
-    }
-    if (a.do === 'audio') {
-      try {
-        let media = null;
-        if (a.file && path.isAbsolute(a.file) && fs.existsSync(a.file)) media = MessageMedia.fromFilePath(a.file);
-        else if (a.file) {
-          const local = path.join(__dirname, 'public', 'media', a.file);
-          if (fs.existsSync(local)) media = MessageMedia.fromFilePath(local);
-        } else if (a.url) {
-          media = await MessageMedia.fromUrl(a.url);
-        }
-        if (!media) {
-          console.error('❌ No se pudo preparar el media de audio:', a);
-          continue;
-        }
-        await client.sendMessage(chatId, media, { sendAudioAsVoice: !!a.asVoice });
-      } catch (err) {
-        console.error('❌ Error enviando audio:', err?.message || err);
-      }
-    }
+
+  // otros motivos de desconexión
+  await sleep(3000);
+  console.log('♻️ Reconectando WA…');
+  try {
+    await wa.initialize();
+  } catch (err) {
+    console.error('❌ Error al reconectar WA:', err?.message || err);
+    setTimeout(() => wa.initialize().catch(()=>{}), 5000);
+  } finally {
+    reconnecting = false;
   }
-}
+});
+
+
+// inicia WA (1 sola vez)
+wa.initialize().catch(err => {
+  console.error('❗ Error inicializando WA:', err);
+});
 
 const botState = { enabled: false, welcome: null, rules: [] };
 
@@ -477,15 +459,69 @@ wa.on('message', async (msg) => {
   }
 });
 
-wa.on('disconnected', (reason) => {
-  console.log('⚠️ Desconectado:', reason, '→ re-inicializando…');
-  setTimeout(() => {
-    try { wa.initialize(); } catch (e) { console.error('Reinit error:', e?.message || e); }
-  }, 1000);
-});
-wa.initialize();
+// helpers de bot
+function findRule(rules = [], text = '') {
+  const s = String(text || '').trim();
+  for (const r of rules) {
+    if (!r) continue;
+    const type = (r.type || 'includes').toLowerCase();
+    const m = String(r.match || '');
+    try {
+      if (type === 'equals' && s.toLowerCase() === m.toLowerCase()) return r;
+      if (type === 'includes' && s.toLowerCase().includes(m.toLowerCase())) return r;
+      if (type === 'regex') {
+        const re = new RegExp(m, 'i');
+        if (re.test(s)) return r;
+      }
+    } catch (e) {
+      console.error('Regla inválida:', r, e?.message || e);
+    }
+  }
+  return null;
+}
+async function runActions(client, chatId, actions = []) {
+  const chat = await client.getChatById(chatId);
+  for (const a of (actions || [])) {
+    if (!a || !a.do) continue;
+    if (a.do === 'delay') {
+      await sleep(Number(a.ms || 0));
+      continue;
+    }
+    if (a.do === 'typing') {
+      try {
+        await chat.sendStateTyping();
+        await sleep(Number(a.ms || 800));
+        await chat.clearState();
+      } catch {}
+      continue;
+    }
+    if (a.do === 'text') {
+      await client.sendMessage(chatId, String(a.text || ''));
+      continue;
+    }
+    if (a.do === 'audio') {
+      try {
+        let media = null;
+        if (a.file && path.isAbsolute(a.file) && fs.existsSync(a.file)) media = MessageMedia.fromFilePath(a.file);
+        else if (a.file) {
+          const local = path.join(__dirname, 'public', 'media', a.file);
+          if (fs.existsSync(local)) media = MessageMedia.fromFilePath(local);
+        } else if (a.url) {
+          media = await MessageMedia.fromUrl(a.url);
+        }
+        if (!media) {
+          console.error('❌ No se pudo preparar el media de audio:', a);
+          continue;
+        }
+        await client.sendMessage(chatId, media, { sendAudioAsVoice: !!a.asVoice });
+      } catch (err) {
+        console.error('❌ Error enviando audio:', err?.message || err);
+      }
+    }
+  }
+}
 
-// ---------- API BÁSICA ----------
+// ---------- APIs ----------
 app.get('/api/ping', (_req, res) => res.json({ ok: true, t: Date.now() }));
 app.get('/api/chats', (_req, res) => res.json(visibleChatsArray()));
 
@@ -659,7 +695,6 @@ app.post('/api/send-to', async (req, res) => {
 });
 
 // ---------- CONTACTOS WA ----------
-// ---------- CONTACTOS WA ----------
 app.get('/api/contacts', async (_req, res) => {
   try {
     const contacts = await wa.getContacts();
@@ -672,8 +707,7 @@ app.get('/api/contacts', async (_req, res) => {
         isGroup: false,
         isMyContact: !!c.isMyContact
       }))
-      // 👇 👇 👇 AQUÍ ES LA CLAVE
-      .filter(c => !hiddenChats.has(c.id)); // si lo "olvidaste", no lo vuelvas a mandar
+      .filter(c => !hiddenChats.has(c.id));
     res.json(data);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -936,7 +970,7 @@ app.get('/api/bot/status', (_req, res) => {
   res.json({ enabled: botState.enabled, rules: botState.rules?.length || 0, welcome: botState.welcome || null });
 });
 
-// ---------- Olvidar/ocultar (AQUÍ ESTÁ TU PARTE IMPORTANTE) ----------
+// ---------- Olvidar/ocultar ----------
 function resolveChatIdFromInput({ chatId, number, name }) {
   if (chatId && chatId.endsWith('@c.us')) return chatId;
   if (number) {
@@ -967,25 +1001,20 @@ app.post('/api/forget-chat', async (req, res) => {
     if (!targetId && body.number) targetId = normalizeToMXWid(body.number);
     if (!targetId) return res.status(404).json({ error: 'No se encontró ningún contacto con ese nombre, número o chatId' });
 
-    // 1. lo ocultamos
     hiddenChats.add(targetId); 
     saveSetTo(HIDDEN_CHATS_FILE, hiddenChats);
 
-    // 2. reseteamos el bot para ese número
     botTriggeredOnce.delete(targetId); 
     saveSetTo(TRIGGERS_FILE, botTriggeredOnce);
 
-    // 3. FORZAMOS que aunque WhatsApp lo tenga en contactos, lo tratemos como extraño
     strangerOverride.add(targetId); 
     saveSetTo(OVERRIDES_FILE, strangerOverride);
 
-    // 4. limpiamos cache en memoria
     state.chats.delete(targetId);
     state.messages.delete(targetId);
     state.assignments.delete(targetId);
     persistAssignments();
 
-    // 5. refrescamos a todos los clientes
     io.emit('chats', visibleChatsArray());
     io.emit('kanban:full', Array.from(state.assignments.values()));
 
@@ -1147,6 +1176,31 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => console.log('👤 Panel desconectado'));
 });
 
+// ----------- Watchdog anti-sueño -----------
+setInterval(async () => {
+  try {
+    const st = await wa.getState();
+    if (st !== 'CONNECTED') {
+      console.warn('⏱ WhatsApp no conectado, reintentando initialize()...');
+      try { await wa.initialize(); } catch {}
+    }
+  } catch (e) {
+    console.error('Error verificando estado de WA:', e?.message || e);
+  }
+}, 60000); // cada 60s
+
 // ---------- Arranque ----------
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`🌐 CRM corriendo en http://localhost:${PORT}`));
+
+// helper usado en /api/messages
+async function waitForChat(client, chatId, { tries = 12, delayMs = 300 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const chat = await client.getChatById(chatId);
+      if (chat) return chat;
+    } catch {}
+    await sleep(delayMs);
+  }
+  throw new Error('Chat aún no disponible');
+}
