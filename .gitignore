@@ -1,0 +1,17 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Datos de tu app
+data/
+uploads/
+tmp/
+
+# sesiones de whatsapp-web.js
+.wwebjs_auth/
+.session/
+session.json
+
+# mac
+.DS_Store

@@ -1,0 +1,1 @@
+{"name":"mi-bot-whatsapp","version":"1.0.0","main":"server.js","scripts":{"start":"node server.js","dev":"NODE_ENV=development node server.js"},"dependencies":{"cookie-parser":"^1.4.7","express":"^4.21.2","fluent-ffmpeg":"^2.1.3","multer":"^2.0.2","puppeteer":"^24.26.1","qrcode-terminal":"^0.12.0","socket.io":"^4.8.1","whatsapp-web.js":"^1.34.1"}}

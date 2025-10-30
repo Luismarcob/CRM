@@ -1,0 +1,283 @@
+/* ============
+   Minimal Chat – Light (ChatGPT-style)
+   ============ */
+:root {
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --text: #0f172a;         /* gris muy oscuro */
+  --muted: #64748b;        /* gris medio para secundarios */
+  --accent: #10b981;       /* verde sutil para acentos */
+  --line: #e5e7eb;         /* líneas y bordes suaves */
+  --input-bg: #ffffff;
+  --input-border: #e5e7eb;
+
+  --bubble-in: #f8fafc;    /* burbuja recibida */
+  --bubble-out: #ecfdf5;   /* burbuja enviada (tinte verde muy leve) */
+
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Header */
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+#status { color: var(--muted); }
+
+/* Layout */
+main{
+  display:grid;
+  grid-template-columns: 280px 1fr;
+  height: calc(100dvh - var(--header-h));
+  overflow:hidden;
+}
+
+/* Sidebar */
+#sidebar {
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+}
+
+.toolbar { padding: 10px; border-bottom: 1px solid var(--line); }
+
+#agentName,
+#searchChat {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text);
+  outline: none;
+}
+#agentName:focus,
+#searchChat:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.12);
+}
+
+#chatList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+#chatList li {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+#chatList li:hover { background: #f8fafc; }
+#chatList li.active {
+  background: #f0fdf4;
+  border-left: 3px solid var(--accent);
+}
+
+/* Conversation area */
+#conversation {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+}
+
+#welcome {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  height: 100%;
+  min-height: 20px; /* tamaño mínimo razonable */
+  max-height: 30px; /* evita que se extienda más */
+  margin: auto;
+  color: #555;
+}
+
+#qrBox.hidden,
+#composer.hidden { display: none; }
+
+#messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Messages */
+.msg { display: flex; }
+.msg.in { justify-content: flex-start; }
+.msg.out { justify-content: flex-end; }
+
+.bubble {
+  max-width: 70%;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  line-height: 1.45;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+.msg.in .bubble {
+  background: var(--bubble-in);
+  border: 1px solid var(--line);
+}
+.msg.out .bubble {
+  background: var(--bubble-out);
+  border: 1px solid #d1fae5;
+}
+
+.meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+/* Composer */
+#composer {
+  border-top: 1px solid var(--line);
+  padding: 12px;
+  background: var(--panel);
+}
+#composer .row {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  gap: 8px;
+}
+#composer input {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text);
+  outline: none;
+}
+#composer input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.12);
+}
+#composer button {
+  border: 0;
+  background: var(--accent);
+  color: #044e3a;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.02s ease;
+}
+#composer button:hover { filter: brightness(0.95); }
+#composer button:active { transform: translateY(1px); }
+
+/* Assignment + contacts */
+.assign { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+#assignBtn {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--input-border);
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+#assignBtn:hover { background: #f8fafc; }
+
+.hidden { display: none; }
+
+#contactList {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+#contactList li {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  font-size: 14px;
+}
+#contactList li:hover { background: #f8fafc; }
+
+/* Small screens */
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; }
+  #sidebar { display: none; }
+}
+main {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: calc(100vh - 60px); /* ocupa la pantalla menos el header */
+  overflow: hidden;
+}
+
+#sidebar {
+  border-right: 1px solid #ddd;
+  overflow-y: auto;
+}
+
+#conversation {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+#messages {
+  flex: 1;
+  overflow-y: auto; /* hace scroll solo dentro del área de mensajes */
+  padding: 16px;
+  scroll-behavior: smooth;
+}
+
+#composer {
+  border-top: 1px solid #ddd;
+  padding: 8px;
+  background: #f8f8f8;
+}
+.msg {
+  margin: 8px;
+  display: flex;
+}
+.msg.in { justify-content: flex-start; }
+.msg.out { justify-content: flex-end; }
+
+.bubble {
+  background: var(--bubble-in);
+  padding: 8px 10px;
+  border-radius: 12px;
+  max-width: 80%;
+  box-shadow: var(--shadow);
+}
+.msg.out .bubble { background: var(--bubble-out); }
+
+.bubble .meta {
+  font-size: 10px;
+  color: #64748b;
+  text-align: right;
+  margin-top: 3px;
+}

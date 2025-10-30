@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Conversaciones en vivo</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="icon" href="data:,">
+<style>/* ============
+   Conversaciones – Estilo claro (igual que Main)
+   ============ */
+:root {
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --accent: #10b981;
+  --line: #e5e7eb;
+  --input-bg: #ffffff;
+  --input-border: #e5e7eb;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.05),
+             0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Header */
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+h1 { margin: 0; font-size: 18px; font-weight: 700; }
+.pill {
+  padding: 6px 10px;
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #065f46;
+}
+
+/* Contenedor */
+.wrap {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 16px 20px 40px;
+}
+
+/* Toolbar */
+.toolbar {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0 16px;
+  flex-wrap: wrap;
+}
+input[type="search"] {
+  flex: 1;
+  min-width: 220px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text);
+  outline: none;
+}
+input[type="search"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.12);
+}
+button {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #044e3a;
+  cursor: pointer;
+  font-weight: 700;
+  transition: filter 0.15s ease, transform 0.02s ease;
+}
+button:hover { filter: brightness(0.95); }
+button:active { transform: translateY(1px); }
+
+/* Lista – una sola columna */
+.list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+/* Tarjetas */
+.card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  transition: background 0.15s ease, border-color 0.15s ease;
+  min-height: 80px;
+}
+.card:hover {
+  background: #f9fafb;
+  border-color: var(--accent);
+}
+
+/* Texto dentro del card */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.name {
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.preview {
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.meta {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Botón a la derecha */
+.btn-open {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #044e3a;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.btn-open:hover { filter: brightness(0.95); }
+
+/* Mensaje vacío */
+.empty {
+  border: 1px dashed var(--line);
+  text-align: center;
+  padding: 24px;
+  color: var(--muted);
+  border-radius: var(--radius);
+}
+.footer {
+  margin-top: 20px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .wrap { padding: 12px; }
+  .card { grid-template-columns: 1fr; gap: 10px; }
+  .btn-open { width: 100%; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <h1>Conversaciones</h1>
+    <span id="statusPill" class="pill">Conectando…</span>
+    <span class="pill" id="countPill">0 chats</span>
+  </header>
+
+  <div class="wrap">
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Buscar por nombre o número…" />
+      <button id="refreshBtn" title="Forzar recarga de lista">Recargar</button>
+    </div>
+
+    <div id="list" class="list"></div>
+
+    <div class="footer">
+      <span class="tag">Socket.IO</span>
+      <span class="tag">Clic → “Abrir conversación” regresa al panel</span>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // ---- Estado en cliente ----
+    let CHATS = []; // [{id,name,isGroup,lastBody,lastTime}]
+    const listEl = document.getElementById('list');
+    const countPill = document.getElementById('countPill');
+    const statusPill = document.getElementById('statusPill');
+    const searchEl = document.getElementById('search');
+    const refreshBtn = document.getElementById('refreshBtn');
+
+    // Canal opcional para avisar a otro tab (no indispensable)
+    const channel = new BroadcastChannel('crm-panel');
+
+    // ---- Socket.IO ----
+    const socket = io({ transports: ['websocket'] });
+
+    socket.on('connect', () => {
+      setStatus('Conectado', '#123d2a', '#1d6d47');
+      // Carga inicial; si aún no hay chats, reintenta suave
+      loadChats({ softRetry: true });
+    });
+
+    socket.on('disconnect', () => {
+      setStatus('Desconectado', '#5b1a1a', '#8a2c2c');
+    });
+
+    // Cuando el backend indica que WhatsApp ya está listo, vuelve a pedir lista
+    socket.on('ready', () => loadChats({ softRetry: true }));
+
+    // El backend emite 'chats' cuando cargan/actualizan (no masivo join!)
+    socket.on('chats', (arr) => {
+      mergeChats(arr);
+      render();
+    });
+
+    // Nota: NO nos unimos a todos los rooms para evitar reconexiones.
+    // Si quisieras ver el "último mensaje" en vivo, haría falta un evento global del server.
+
+    // ---- Utilidades ----
+    function setStatus(text, bg, border) {
+      statusPill.textContent = text;
+      if (bg) {
+        statusPill.style.background = bg;
+        statusPill.style.borderColor = border || bg;
+      }
+    }
+
+    async function loadChats({ softRetry = false } = {}) {
+      try {
+        // Soporta arreglo o respuesta paginada {items,total}
+        const r = await fetch('/api/chats');
+        const payload = await r.json();
+        const items = Array.isArray(payload) ? payload : (payload.items || []);
+
+        CHATS = items.map(c => ({ ...c, lastBody: '', lastTime: 0 }));
+        countPill.textContent = `${CHATS.length} chats`;
+        render();
+
+        // Reintento suave si aún no hay chats
+        if (softRetry && CHATS.length === 0) {
+          setTimeout(() => loadChats({ softRetry: false }), 900);
+        }
+      } catch (e) {
+        console.error('Error cargando /api/chats', e);
+      }
+    }
+
+    function mergeChats(arr) {
+      const map = new Map(CHATS.map(c => [c.id, c]));
+      (arr || []).forEach(c => {
+        const prev = map.get(c.id);
+        map.set(c.id, prev ? { ...prev, ...c } : { ...c, lastBody: '', lastTime: 0 });
+      });
+      CHATS = Array.from(map.values());
+      countPill.textContent = `${CHATS.length} chats`;
+    }
+
+    function fmtTime(ts) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      return d.toLocaleString();
+    }
+
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    function render() {
+      const q = (searchEl.value || '').trim().toLowerCase();
+      const rows = (q ? CHATS.filter(c =>
+        (c.name||'').toLowerCase().includes(q) ||
+        String(c.id).toLowerCase().includes(q) ||
+        String(c.number||'').toLowerCase().includes(q)
+      ) : CHATS);
+
+      countPill.textContent = `${rows.length} chats`;
+
+      if (rows.length === 0) {
+        listEl.innerHTML = `<div class="empty card">Sin resultados. Escribe arriba para buscar o espera nuevos mensajes…</div>`;
+        return;
+      }
+
+      listEl.innerHTML = rows.map(c => `
+        <div class="card">
+          <div class="rows" style="flex:1; min-width:0;">
+            <div class="name" title="${c.id}">${escapeHtml(c.name || c.id)}</div>
+            <div class="muted" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              ${c.isGroup ? 'Grupo' : 'Privado'}${c.lastTime ? ' • ' + fmtTime(c.lastTime) : ''}${c.lastBody ? ' • ' + escapeHtml(c.lastBody) : ''}
+            </div>
+          </div>
+          <div class="right">
+            <button class="btn-open"
+                    data-chat-id="${c.id}"
+                    data-name="${escapeHtml(c.name || c.id)}">
+              Abrir conversación
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Buscar
+    searchEl.addEventListener('input', render);
+    refreshBtn.addEventListener('click', () => loadChats({ softRetry: true }));
+
+    // Abrir conversación → guardar y redirigir al panel principal
+    document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.btn-open');
+  if (!btn) return;
+
+  e.preventDefault();
+
+  const id   = btn.dataset.chatId;               // viene de data-chat-id
+  const name = btn.dataset.name || '';           // viene de data-name
+
+  if (!id) {
+    alert('No viene el chatId en data-chat-id');
+    return;
+  }
+
+  // Guardado de respaldo por si se pierde el querystring
+  try {
+    localStorage.setItem('openChatId', id);
+    localStorage.setItem('openChatName', name);
+  } catch (_) {}
+
+  // Redirige al panel principal con los params que index/app.js espera
+  const url = `/index.html?chatId=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`;
+  window.location.href = url;    // misma pestaña (usa "_blank" si lo quieres en otra)
+});
+
+  </script>
+</body>
+</html>

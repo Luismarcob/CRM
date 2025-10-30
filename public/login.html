@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Login – Mini CRM</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body {
+      margin:0;
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:#0f172a;
+      font-family:system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .card {
+      background:white;
+      padding:24px 26px 20px;
+      border-radius:14px;
+      width: min(360px, 100%);
+      box-shadow:0 10px 45px rgba(15,23,42,.18);
+    }
+    h1 { margin:0 0 12px; font-size:20px; }
+    p { margin:0 0 16px; color:#64748b; font-size:13px; }
+    label { display:block; font-size:12px; font-weight:600; margin-bottom:4px; }
+    input {
+      width:100%;
+      border:1px solid #e5e7eb;
+      border-radius:8px;
+      padding:8px 10px;
+      font-size:14px;
+      margin-bottom:10px;
+    }
+    button {
+      width:100%;
+      background:#0f172a;
+      color:white;
+      border:none;
+      border-radius:8px;
+      padding:9px 0;
+      font-weight:600;
+      cursor:pointer;
+    }
+    .error {
+      background:#fee2e2;
+      color:#b91c1c;
+      padding:6px 10px;
+      border-radius:8px;
+      font-size:12px;
+      margin-bottom:10px;
+      display:none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Iniciar sesión</h1>
+    <p>Ingresa tus credenciales.</p>
+    <div id="error" class="error"></div>
+    <label for="user">Usuario</label>
+    <input id="user" type="text" autocomplete="username" value="admin">
+    <label for="pass">Contraseña</label>
+    <input id="pass" type="password" autocomplete="current-password" value="admin">
+    <button id="btn">Entrar</button>
+  </div>
+  <script>
+    const btn = document.getElementById('btn');
+    const err = document.getElementById('error');
+    btn.addEventListener('click', async () => {
+      const username = document.getElementById('user').value.trim();
+      const password = document.getElementById('pass').value.trim();
+      err.style.display = 'none';
+      try {
+        const res = await fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          err.textContent = data.error || 'Credenciales inválidas';
+          err.style.display = 'block';
+          return;
+        }
+        // éxito
+        window.location.href = '/index.html';
+      } catch (e) {
+        err.textContent = e.message;
+        err.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

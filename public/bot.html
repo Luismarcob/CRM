@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Instalar bot por JSON</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { 
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; 
+      color-scheme: light dark; 
+    }
+    body { 
+      margin: 0; 
+      padding: 24px; 
+      background: #f8f9fc; 
+    }
+    h1 { 
+      margin-top: 0; 
+    }
+    .card { 
+      border: 1px solid #ddd; 
+      border-radius: 12px; 
+      padding: 16px; 
+      max-width: 700px; 
+      background: white; 
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    .row { 
+      display: flex; 
+      gap: 12px; 
+      align-items: center; 
+      flex-wrap: wrap; 
+    }
+    button { 
+      padding: 10px 14px; 
+      border-radius: 10px; 
+      border: 1px solid #bbb; 
+      cursor: pointer; 
+      background: #e7eaf6; 
+      transition: 0.2s; 
+    }
+    button:hover { 
+      background: #d2d8f0; 
+    }
+    pre, textarea { 
+      background: #f6f6f6; 
+      padding: 12px; 
+      border-radius: 8px; 
+      overflow: auto; 
+      width: 100%;
+      font-family: monospace;
+    }
+    textarea {
+      min-height: 150px;
+      resize: vertical;
+    }
+    .ok { color: #0a7a2a; }
+    .err { color: #b00020; }
+    .muted { color: #666; }
+    .pill { 
+      display:inline-block; 
+      padding:4px 8px; 
+      border:1px solid #ccc; 
+      border-radius:999px; 
+      font-size:12px; 
+    }
+  </style>
+</head>
+<body>
+  <h1>🤖 Cargar y activar bot (JSON)</h1>
+  <div class="card">
+    <p>Selecciona tu archivo <b>.json</b> o pega directamente el código JSON abajo, luego presiona <b>“Cargar & activar”</b>.</p>
+
+    <div class="row" style="margin: 12px 0;">
+      <input id="file" type="file" accept="application/json" />
+      <button id="btnUpload">Cargar & activar</button>
+      <button id="btnDisable" title="Apaga las respuestas automáticas">Desactivar bot</button>
+      <span id="status" class="pill muted">Estado: consultando…</span>
+    </div>
+
+    <textarea id="jsonInput" placeholder='Pega aquí el código JSON del bot...'></textarea>
+
+    <div id="msg" class="muted" style="margin-top:10px;">Sin acciones todavía.</div>
+
+    <h3 style="margin-top:24px">Formato de ejemplo</h3>
+    <pre>{
+  "welcome": "¡Hola! Soy tu asistente virtual 👋",
+  "rules": [
+    { "type": "equals",   "match": "hola",           "reply": "¡Hola! ¿En qué puedo ayudarte?" },
+    { "type": "includes", "match": "precio",         "reply": "Nuestros planes empiezan desde $999 MXN." },
+    { "type": "regex",    "match": "^ayuda\\b",      "reply": "Opciones: 1) Ventas 2) Soporte 3) Facturación" }
+  ]
+}</pre>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const msg = (html, cls='') => { 
+      const el = $('#msg'); 
+      el.className = cls; 
+      el.innerHTML = html; 
+    };
+
+    async function refreshStatus() {
+      try {
+        const r = await fetch('/api/bot/status');
+        if (!r.ok) throw new Error('No se pudo consultar el estado');
+        const j = await r.json();
+        $('#status').textContent = `Estado: ${j.enabled ? 'ACTIVO' : 'inactivo'} (${j.rules||0} reglas)`;
+        $('#status').className = 'pill ' + (j.enabled ? 'ok' : 'muted');
+      } catch (e) {
+        $('#status').textContent = 'Estado: error';
+        $('#status').className = 'pill err';
+      }
+    }
+
+    // Subir y activar bot (archivo o texto)
+    $('#btnUpload').addEventListener('click', async () => {
+      let payloadText = '';
+      const f = $('#file').files[0];
+      const textArea = $('#jsonInput').value.trim();
+
+      if (f) {
+        payloadText = await f.text();
+      } else if (textArea) {
+        payloadText = textArea;
+      } else {
+        return msg('Selecciona un archivo o pega el código JSON.', 'err');
+      }
+
+      try {
+        const payload = JSON.parse(payloadText); // valida JSON
+        const r = await fetch('/api/bot/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j?.error || 'Error al subir');
+        msg(`✔ Bot cargado con ${j.count} reglas. Quedó ACTIVADO.`, 'ok');
+        refreshStatus();
+      } catch (e) {
+        msg('❌ ' + (e.message || e), 'err');
+      }
+    });
+
+    // Desactivar bot
+    $('#btnDisable').addEventListener('click', async () => {
+      try {
+        const r = await fetch('/api/bot/disable', { method: 'POST' });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j?.error || 'No se pudo desactivar');
+        msg('⏹ Bot desactivado. No responderá automáticamente.', 'muted');
+        refreshStatus();
+      } catch (e) {
+        msg('❌ ' + (e.message || e), 'err');
+      }
+    });
+
+    refreshStatus();
+  </script>
+</body>
+</html>
