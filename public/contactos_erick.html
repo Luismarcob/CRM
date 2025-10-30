@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="es">
+<head>
+        <div class="nav-links">
+        <a href="/index.html" class="nav-link active">Inicio</a>
+        <a href="/contactos.html" class="nav-link">Contactos</a>
+        <a href="/kanban.html" class="nav-link">Kanban</a>
+        <a href="/bot.html" class="nav-link">Bot</a>
+        <a href="/live.html" class="nav-link">Live Chat</a>
+      </div>
+  <meta charset="utf-8" />
+  <title>Mini CRM – Lista tipo Excel (editable + server)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root {
+      --bg: #f3f4f6;
+      --panel: #ffffff;
+      --line: #e5e7eb;
+      --accent: #10b981;
+      --danger: #ef4444;
+      --text: #0f172a;
+      --blue: #3b82f6;
+      --green: #10b981;
+      --red: #ef4444;
+    }
+    * { box-sizing: border-box; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      padding: 20px;
+    }
+    h1 { margin-top: 0; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 2px rgba(15,23,42,.06);
+    }
+    form {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+    label {
+      font-size: 12px;
+      font-weight: 600;
+      display: block;
+      margin-bottom: 4px;
+    }
+    input, select {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 13px;
+    }
+    button {
+      border: none;
+      cursor: pointer;
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-weight: 600;
+    }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-danger { background: var(--danger); color: white; }
+    .btn-secondary { background: #e2e8f0; color: #0f172a; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      background: white;
+    }
+    th, td {
+      border: 1px solid #d1d5db;
+      padding: 6px 8px;
+      font-size: 13px;
+      text-align: left;
+      vertical-align: middle;
+    }
+    th { background: #f8fafc; font-weight: 700; }
+    tr:nth-child(even) td { background: #f9fafb; }
+    .top-actions {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .muted { color: #6b7280; font-size: 12px; }
+    .date-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      color: white;
+    }
+    .date-blue { background: var(--blue); }
+    .date-green { background: var(--green); }
+    .date-red { background: var(--red); }
+    .inline-input {
+      width: 100%;
+      padding: 3px 5px;
+      font-size: 12px;
+    }
+    @media (max-width: 720px) {
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <h1>📋 Registro de contactos</h1>
+
+  <div class="card">
+    <div class="top-actions">
+      <div class="muted">Captura los datos y se guardan en el servidor.</div>
+      <div>
+        <button id="btn-export" class="btn-primary" type="button">⬇️ Exportar CSV</button>
+        <button id="btn-clear" class="btn-danger" type="button">🗑 Limpiar todo</button>
+      </div>
+    </div>
+    <form id="form-contacto">
+      <div>
+        <label for="id">ID</label>
+        <input type="number" id="id" name="id" placeholder="1" required />
+      </div>
+      <div>
+        <label for="nombre">Nombre</label>
+        <input id="nombre" name="nombre" placeholder="JUAN" required />
+      </div>
+      <div>
+        <label for="numero">Número</label>
+        <input id="numero" name="numero" placeholder="221 214 8921" required />
+      </div>
+      <div>
+        <label for="proyecto">Proyecto</label>
+        <input id="proyecto" name="proyecto" placeholder="PERFUMES" />
+      </div>
+      <div>
+        <label for="porcentaje">%</label>
+        <input type="number" id="porcentaje" name="porcentaje" min="0" max="100" step="1" value="0" />
+      </div>
+      <div>
+        <label for="dia">Día a contactar</label>
+        <input type="date" id="dia" name="dia" />
+      </div>
+      <div>
+        <label for="estatus">Estatus</label>
+        <input id="estatus" name="estatus" placeholder="No contesta / Cerrado / etc." />
+      </div>
+      <div>
+        <button type="submit" class="btn-primary">➕ Agregar</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <table id="tabla-contactos">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nombre</th>
+          <th>Número</th>
+          <th>Proyecto</th>
+          <th>%</th>
+          <th>Día a contactar</th>
+          <th>LUIS?</th>
+          <th>Estatus</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    const tablaBody = document.querySelector('#tabla-contactos tbody');
+    const form = document.getElementById('form-contacto');
+    const btnExport = document.getElementById('btn-export');
+    const btnClear = document.getElementById('btn-clear');
+
+    // guardamos en memoria del navegador lo que trae el server para no andar pidiendo a cada rato
+    let currentData = [];
+    let currentEditIndex = null;
+
+    function todayStr() {
+      const d = new Date();
+      return d.toISOString().split('T')[0];
+    }
+    function getDateClass(dateStr) {
+      if (!dateStr) return '';
+      const today = todayStr();
+      if (dateStr === today) return 'date-blue';
+      if (dateStr > today) return 'date-green';
+      if (dateStr < today) return 'date-red';
+      return '';
+    }
+
+    async function fetchContacts() {
+      const res = await fetch('/api/excel-contacts');
+      const json = await res.json();
+      currentData = Array.isArray(json.items) ? json.items : [];
+      renderTable();
+      // set siguiente id
+      const last = currentData[currentData.length - 1];
+      form.id.value = last ? Number(last.id) + 1 : 1;
+    }
+
+    function renderTable(editIndex = null) {
+      currentEditIndex = editIndex;
+      tablaBody.innerHTML = '';
+      currentData.forEach((item, idx) => {
+        const tr = document.createElement('tr');
+
+        if (editIndex === idx) {
+          tr.innerHTML = `
+            <td><input class="inline-input" type="number" value="${item.id || ''}" data-field="id" /></td>
+            <td><input class="inline-input" value="${item.nombre || ''}" data-field="nombre" /></td>
+            <td><input class="inline-input" value="${item.numero || ''}" data-field="numero" /></td>
+            <td><input class="inline-input" value="${item.proyecto || ''}" data-field="proyecto" /></td>
+            <td><input class="inline-input" type="number" value="${item.porcentaje ?? ''}" data-field="porcentaje" /></td>
+            <td><input class="inline-input" type="date" value="${item.dia || ''}" data-field="dia" /></td>
+            <td style="text-align:center;"><input type="checkbox" data-field="luis" ${item.luis === 'TRUE' ? 'checked' : ''} /></td>
+            <td><input class="inline-input" value="${item.estatus || ''}" data-field="estatus" /></td>
+            <td>
+              <button class="btn-primary" data-action="save" data-idx="${idx}" style="margin-right:4px;">Guardar</button>
+              <button class="btn-secondary" data-action="cancel" data-idx="${idx}">Cancelar</button>
+            </td>
+          `;
+        } else {
+          const dateClass = getDateClass(item.dia);
+          const dateLabel = item.dia ? `<span class="date-pill ${dateClass}">${item.dia}</span>` : '';
+          tr.innerHTML = `
+            <td>${item.id || ''}</td>
+            <td>${item.nombre || ''}</td>
+            <td>${item.numero || ''}</td>
+            <td>${item.proyecto || ''}</td>
+            <td>${item.porcentaje ?? ''}</td>
+            <td>${dateLabel}</td>
+            <td style="text-align:center;">
+              <input type="checkbox" data-action="toggle-luis" data-idx="${idx}" ${item.luis === 'TRUE' ? 'checked' : ''} />
+            </td>
+            <td>${item.estatus || ''}</td>
+            <td>
+              <button class="btn-secondary" data-action="edit" data-idx="${idx}" style="margin-right:4px;">Editar</button>
+              <button class="btn-danger" data-action="delete" data-idx="${idx}">Eliminar</button>
+            </td>
+          `;
+        }
+
+        tablaBody.appendChild(tr);
+      });
+    }
+
+    // crear/actualizar en el server
+    async function upsertContact(record) {
+      await fetch('/api/excel-contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(record)
+      });
+    }
+
+    // borrar en el server
+    async function deleteContact(id) {
+      await fetch('/api/excel-contacts/' + encodeURIComponent(id), {
+        method: 'DELETE'
+      });
+    }
+
+    // borrar todo en el server
+    async function clearContacts() {
+      await fetch('/api/excel-contacts', { method: 'DELETE' });
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const record = {
+        id: form.id.value.trim(),
+        nombre: form.nombre.value.trim(),
+        numero: form.numero.value.trim(),
+        proyecto: form.proyecto.value.trim(),
+        porcentaje: form.porcentaje.value.trim(),
+        dia: form.dia.value,
+        luis: 'FALSE',
+        estatus: form.estatus.value.trim()
+      };
+      await upsertContact(record);
+      await fetchContacts();
+      form.reset();
+      // set siguiente id
+      const last = currentData[currentData.length - 1];
+      form.id.value = last ? Number(last.id) + 1 : 1;
+    });
+
+    tablaBody.addEventListener('click', async (e) => {
+      const action = e.target.dataset.action;
+      if (!action) return;
+      const idx = Number(e.target.dataset.idx);
+      const item = currentData[idx];
+
+      if (action === 'delete') {
+        await deleteContact(item.id);
+        await fetchContacts();
+      }
+
+      if (action === 'edit') {
+        renderTable(idx);
+      }
+
+      if (action === 'cancel') {
+        renderTable();
+      }
+
+      if (action === 'save') {
+        const row = e.target.closest('tr');
+        const inputs = row.querySelectorAll('[data-field]');
+        const updated = { ...item };
+        inputs.forEach(inp => {
+          const field = inp.dataset.field;
+          if (field === 'luis') updated.luis = inp.checked ? 'TRUE' : 'FALSE';
+          else updated[field] = inp.value;
+        });
+        await upsertContact(updated);
+        await fetchContacts();
+      }
+
+      if (action === 'toggle-luis') {
+        const updated = { ...item, luis: e.target.checked ? 'TRUE' : 'FALSE' };
+        await upsertContact(updated);
+        // no es obligatorio recargar todo, pero lo hacemos para refrescar colores/orden
+        await fetchContacts();
+      }
+    });
+
+    btnClear.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar todos los registros?')) return;
+      await clearContacts();
+      currentData = [];
+      renderTable();
+      form.id.value = 1;
+    });
+
+    btnExport.addEventListener('click', () => {
+      if (!currentData.length) return alert('No hay registros para exportar');
+      const header = ['ID','Nombre','Numero','Proyecto','%','Dia a contactar','LUIS?','Estatus'];
+      const rows = currentData.map(i => [
+        i.id ?? '',
+        i.nombre ?? '',
+        i.numero ?? '',
+        i.proyecto ?? '',
+        i.porcentaje ?? '',
+        i.dia ?? '',
+        i.luis ?? '',
+        i.estatus ?? ''
+      ]);
+      const all = [header, ...rows];
+      const csv = all.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'contactos.csv'; a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // cargar al inicio desde el server
+    fetchContacts();
+  </script>
+</body>
+</html>

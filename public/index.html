@@ -5,16 +5,29 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Mini CRM – WhatsApp</title>
 <link rel="stylesheet" href="/styles.css" />
-</head>
-<body>
-<header>
-  <h1>📞 Mini CRM – WhatsApp</h1>
-  <div id="status">Conectando…</div>
-  <button id="btn-live" onclick="window.location.href='/live.html'">💬 Ir al Live Chat</button>
-</header>
+<header class="topbar">
+  <!-- Fila 1: botones -->
 
+  <!-- Fila 2: título -->
+  <div class="top-title">
+    <h1>📞 Mini CRM – <span>WhatsApp</span></h1>
+  </div>
+
+  <!-- Fila 3: estado + menú -->
+  <div class="top-nav">
+    <div id="status" class="status">WhatsApp listo ✅</div>
+    <nav class="nav-links">
+      <a href="/index.html" class="nav-link active">Inicio</a>
+      <a href="/contactos.html" class="nav-link">Contactos Lucas</a>
+      <a href="/contactos_erick.html" class="nav-link">Contactos Erick</a>
+      <a href="/contactos_sebas.html" class="nav-link">Contactos Sebas</a>
+      <a href="/kanban.html" class="nav-link">Kanban</a>
+      <a href="/live.html" class="nav-link">Live Chat</a>
+    </nav>
+  </div>
+</header>
 <main>
-  <!-- Botón existente para agregar nuevo contacto -->
+  <!-- Botón: agregar nuevo contacto -->
   <script>
   (function () {
     const btn = document.createElement('button');
@@ -45,33 +58,23 @@
       const firstMessage = prompt('Primer mensaje (opcional):') || '';
 
       try {
-        const res = await fetch('/api/new-contact', {
+        const res = await fetch('/api/send-to', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, number, firstMessage })
+          body: JSON.stringify({ contactId: number, text: firstMessage || 'Hola 👋' })
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'No se pudo crear la conversación');
 
-        // abrir la conversación recién creada
         const chatId = data.chatId;
         const chatName = (data.chat && data.chat.name) || name || chatId;
 
-        // Sembramos para que app.js la abra seguro
         try {
           localStorage.setItem('openChatId', chatId);
           localStorage.setItem('openChatName', chatName);
         } catch (_) {}
 
-        // Redirige al panel con parámetros
         window.location.href = `/index.html?chatId=${encodeURIComponent(chatId)}&name=${encodeURIComponent(chatName)}`;
-
-        // Guarda provisionalmente el contacto en la lista local
-        try {
-          const existing = JSON.parse(localStorage.getItem('tempContacts') || '[]');
-          existing.push({ id: chatId, name: chatName, number });
-          localStorage.setItem('tempContacts', JSON.stringify(existing));
-        } catch (_) {}
       } catch (e) {
         alert('Error: ' + e.message);
       }
@@ -79,7 +82,7 @@
   })();
   </script>
 
-  <!-- Botón eliminar/olvidar (soft-delete) -->
+  <!-- Botón: eliminar/olvidar -->
   <script>
   (function () {
     const delBtn = document.createElement('button');
@@ -104,12 +107,18 @@
       document.body.appendChild(delBtn);
     }
 
+    // 🔴 elimina realmente en el server y lo marca como extraño para que el bot sí se active después
     delBtn.addEventListener('click', async () => {
-      let raw = prompt('Escribe el NOMBRE, número (55XXXXXXXX o 5255XXXXXXXX) o chatId (@c.us):');
+      // primero intentamos tomar el chat activo
+      let raw =
+        (window.__currentChatId) ||
+        (document.querySelector('#chatList .active')?.dataset.chatId) ||
+        (localStorage.getItem('openChatId') || '');
+
+      // si no hay activo, preguntamos
       if (!raw) {
-        // Usa el chat activo si no escribe nada
-        raw = (window.__currentChatId || localStorage.getItem('openChatId') || '').trim();
-        if (!raw) return alert('No hay chat abierto ni se ingresó un valor.');
+        raw = prompt('Escribe el NOMBRE, número (55XXXXXXXX o 5255XXXXXXXX) o chatId (@c.us):') || '';
+        if (!raw.trim()) return;
       }
 
       const body = {};
@@ -117,7 +126,7 @@
       else if (/^\d+$/.test(raw.replace(/\D+/g, ''))) body.number = raw;
       else body.name = raw;
 
-      if (!confirm('¿Eliminar/olvidar este contacto en el panel y limpiar el trigger del bot?')) return;
+      if (!confirm('¿Eliminar/olvidar este contacto en el panel y reiniciar trigger del bot?')) return;
 
       try {
         const res = await fetch('/api/forget-chat', {
@@ -128,15 +137,27 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'No se pudo eliminar');
 
-        alert('Contacto olvidado correctamente.\nSi ese número te vuelve a escribir (y no está en tus contactos), el bot se activará una única vez de nuevo.');
-
-        const chatId = data.chatId || body.chatId || '';
-        if (chatId) {
-          const li = document.querySelector(`#chatList [data-chat-id="${chatId}"]`);
+        const deletedId = data.chatId || body.chatId || '';
+        // borra del DOM
+        if (deletedId) {
+          const li = document.querySelector(`#chatList [data-chat-id="${deletedId}"]`);
           if (li && li.parentNode) li.parentNode.removeChild(li);
-          const messages = document.getElementById('messages');
-          if (messages) messages.innerHTML = '';
+          if (window.__currentChatId === deletedId) {
+            window.__currentChatId = '';
+            try {
+              localStorage.removeItem('openChatId');
+              localStorage.removeItem('openChatName');
+            } catch (_) {}
+            const messages = document.getElementById('messages');
+            if (messages) messages.innerHTML = '';
+            const composer = document.getElementById('composer');
+            if (composer) composer.classList.add('hidden');
+            const welcome = document.getElementById('welcome');
+            if (welcome) welcome.classList.remove('hidden');
+          }
         }
+
+        alert('Contacto olvidado correctamente. Cuando vuelva a escribir, el bot se va a disparar.');
       } catch (e) {
         alert('Error: ' + e.message);
       }
@@ -174,7 +195,6 @@
       </div>
 
       <div class="assign">
-        <button type="button" id="assignBtn">👤 Asignarme este chat</button>
         <span id="assignedTo"></span>
       </div>
       <div class="row">
@@ -187,30 +207,22 @@
 
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script src="/app.js"></script>
+
 <script>
 (function () {
-  // === Obtención robusta del chat activo ===
   function getCurrentChatId() {
-    // 1) Preferir el chat marcado visualmente como activo
     const active = document.querySelector('#chatList .active');
     if (active && active.dataset.chatId) return active.dataset.chatId;
-
-    // 2) Variable global que app.js mantiene al abrir un chat
     if (window.__currentChatId) return window.__currentChatId;
-
-    // 3) URL (?chatId=...)
     try {
       const url = new URL(window.location.href);
       const qs = url.searchParams.get('chatId');
       if (qs) return qs;
     } catch {}
-
-    // 4) Respaldo en localStorage
     try {
       const stored = localStorage.getItem('openChatId');
       if (stored) return stored;
     } catch {}
-
     return '';
   }
 
@@ -220,10 +232,9 @@
   const recStatus = document.getElementById('recStatus');
   const textInput = document.getElementById('text');
 
-  // ----- Adjuntar archivos -----
+  // ---- Adjuntar archivos ----
   if (btnAttach && filePicker) {
     btnAttach.addEventListener('click', () => filePicker.click());
-
     filePicker.addEventListener('change', async () => {
       const chatId = getCurrentChatId();
       if (!chatId) { alert('Abre primero una conversación.'); filePicker.value=''; return; }
@@ -238,14 +249,14 @@
         const res = await fetch('/api/send-media', { method: 'POST', body: fd });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Error enviando adjuntos');
-        filePicker.value = ''; // limpia selección
+        filePicker.value = '';
       } catch (e) {
         alert('No se pudo enviar: ' + e.message);
       }
     });
   }
 
-  // ----- Grabación de audio (toggle iniciar/detener) -----
+  // ----- Grabación de audio -----
   let mediaStream = null;
   let mediaRecorder = null;
   let chunks = [];
@@ -293,41 +304,6 @@
       alert('No se pudo enviar el audio: ' + e.message);
     }
   }
-async function stopRec() {
-  if (!mediaRecorder) return;
-  mediaRecorder.stop();
-  mediaStream.getTracks().forEach(t => t.stop());
-  mediaRecorder = null;
-  mediaStream = null;
-  btnAudio.textContent = '🎙️';
-}
-
-async function sendAudio() {
-  if (!chunks.length) { alert('No se grabó audio.'); return; }
-
-  const chatId = getCurrentChatId();
-  if (!chatId) { alert('Abre primero una conversación.'); return; }
-
-  recStatus.textContent = 'Procesando…';
-
-  const blob = new Blob(chunks, { type: 'audio/webm' });
-  const fd = new FormData();
-  fd.append('chatId', chatId);
-  fd.append('audio', blob, 'nota.webm');
-
-  try {
-    const res = await fetch('/api/send-audio', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error enviando audio');
-    recStatus.textContent = 'Nota de voz enviada';
-  } catch (e) {
-    recStatus.textContent = '';
-    alert('No se pudo enviar el audio: ' + e.message);
-  } finally {
-    chunks = [];
-    setTimeout(() => recStatus.textContent = '', 1200);
-  }
-}
 
   if (btnAudio) {
     btnAudio.addEventListener('click', () => {

@@ -58,19 +58,25 @@
     <h1>Iniciar sesión</h1>
     <p>Ingresa tus credenciales.</p>
     <div id="error" class="error"></div>
+
+    <!-- 👇 importante: quitar value y desactivar autocomplete -->
     <label for="user">Usuario</label>
-    <input id="user" type="text" autocomplete="username" value="admin">
+    <input id="user" type="text" name="username" autocomplete="off" autofocus>
+
     <label for="pass">Contraseña</label>
-    <input id="pass" type="password" autocomplete="current-password" value="admin">
+    <input id="pass" type="password" name="password" autocomplete="new-password">
+
     <button id="btn">Entrar</button>
   </div>
   <script>
     const btn = document.getElementById('btn');
     const err = document.getElementById('error');
+
     btn.addEventListener('click', async () => {
       const username = document.getElementById('user').value.trim();
       const password = document.getElementById('pass').value.trim();
       err.style.display = 'none';
+
       try {
         const res = await fetch('/login', {
           method: 'POST',
@@ -83,7 +89,6 @@
           err.style.display = 'block';
           return;
         }
-        // éxito
         window.location.href = '/index.html';
       } catch (e) {
         err.textContent = e.message;

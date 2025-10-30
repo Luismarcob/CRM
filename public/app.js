@@ -19,8 +19,8 @@
   let mergedList = [];
   let currentChatId = null;
 
-  // ====== KANBAN STATE ======
-  // items: [{id, title, lane}]
+  // 🔴 nuevo: aquí guardamos lo que el usuario ya eliminó/ocultó en el index
+  const hiddenLocal = new Set();
 
   function setStatus(txt) {
     if (statusEl) statusEl.textContent = txt;
@@ -92,23 +92,35 @@
     return '';
   }
 
-  // ====== RENDER LISTA LATERAL (por si sigues usando la lista clásica) ======
+  // ====== RENDER LISTA LATERAL ======
   function renderList(arr) {
     if (!chatList) return;
-    chatList.innerHTML = arr.map(c => {
-      const label = c.name || c.id;
-      const isActive = c.id === currentChatId;
-      return `<li data-chat-id="${esc(c.id)}" class="${isActive ? 'active' : ''}">
-        <div>${esc(label)}</div>
-        <div style="font-size:11px;color:#64748b;">${c.isGroup ? 'Grupo' : 'Privado'} • ${esc(c.number || '')}</div>
-      </li>`;
-    }).join('');
+    chatList.innerHTML = arr
+      .filter(c => !hiddenLocal.has(c.id)) // 🔴 no mostrar los que ya borraste
+      .map(c => {
+        const label = c.name || c.id;
+        const isActive = c.id === currentChatId;
+        return `<li data-chat-id="${esc(c.id)}" class="${isActive ? 'active' : ''}">
+          <div style="display:flex;justify-content:space-between;gap:6px;align-items:center;">
+            <div>
+              <div>${esc(label)}</div>
+              <div style="font-size:11px;color:#64748b;">${c.isGroup ? 'Grupo' : 'Privado'} • ${esc(c.number || '')}</div>
+            </div>
+            <button data-del="${esc(c.id)}" style="border:none;background:transparent;color:#ef4444;font-size:16px;cursor:pointer;line-height:1;">×</button>
+          </div>
+        </li>`;
+      }).join('');
   }
 
   function mergeAndRender() {
     const map = new Map();
+    // 1) los chats reales que manda el server
     for (const c of allChats) map.set(c.id, c);
-    for (const c of allContacts) if (!map.has(c.id)) map.set(c.id, c);
+    // 2) los contactos de WA, PERO solo si no están ocultos
+    for (const c of allContacts) {
+      if (hiddenLocal.has(c.id)) continue; // 🔴 no lo reinsertes
+      if (!map.has(c.id)) map.set(c.id, c);
+    }
     mergedList = Array.from(map.values());
     renderList(mergedList);
   }
@@ -183,143 +195,13 @@
 
   function openFromQueryOrStorage() {
     const cid = getCurrentChatId();
-    if (cid) {
+    if (cid && !hiddenLocal.has(cid)) {
       const found = mergedList.find(x => x.id === cid);
       openChat(cid, found ? (found.name || found.id) : cid);
     }
   }
 
-  // ====== KANBAN RENDER ======
-  function renderKanban() {
-    if (!kanbanEl) return;
-    kanbanEl.innerHTML = '';
-    lanesOrder.forEach(laneId => {
-      const col = document.createElement('div');
-      col.className = 'kanban-col';
-      col.dataset.lane = laneId;
-      col.style.minWidth = '220px';
-      col.style.background = '#e2e8f0';
-      col.style.borderRadius = '10px';
-      col.style.padding = '6px';
-      col.style.display = 'flex';
-      col.style.flexDirection = 'column';
-      col.style.maxHeight = '300px';
-      col.style.overflowY = 'auto';
-
-      const header = document.createElement('div');
-      header.textContent = laneLabels[laneId] || laneId;
-      header.style.fontWeight = '600';
-      header.style.marginBottom = '4px';
-      header.style.display = 'flex';
-      header.style.justifyContent = 'space-between';
-      header.style.alignItems = 'center';
-
-      // botón para crear directo en esta columna
-      const addBtn = document.createElement('button');
-      addBtn.textContent = '+';
-      addBtn.style.border = 'none';
-      addBtn.style.background = '#0f172a';
-      addBtn.style.color = 'white';
-      addBtn.style.borderRadius = '6px';
-      addBtn.style.width = '22px';
-      addBtn.style.height = '22px';
-      addBtn.style.cursor = 'pointer';
-      addBtn.onclick = () => {
-        const title = prompt('Nombre de la tarjeta / conversación:');
-        if (!title) return;
-        const fakeId = 'local-' + Date.now();
-        // mandamos al server
-        fetch('/api/kanban/upsert', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json'},
-          body: JSON.stringify({ id: fakeId, title, lane: laneId })
-        }).catch(()=>{});
-      };
-
-      header.appendChild(addBtn);
-      col.appendChild(header);
-
-      const items = kanbanItems.filter(it => it.lane === laneId);
-      items.forEach(it => {
-        const card = document.createElement('div');
-        card.className = 'kanban-card';
-        card.draggable = true;
-        card.dataset.id = it.id;
-        card.style.background = '#ffffff';
-        card.style.borderRadius = '8px';
-        card.style.padding = '6px 8px';
-        card.style.marginBottom = '6px';
-        card.style.cursor = 'grab';
-        card.style.display = 'flex';
-        card.style.justifyContent = 'space-between';
-        card.style.alignItems = 'center';
-        card.style.gap = '4px';
-
-        const title = document.createElement('div');
-        title.textContent = it.title || it.id;
-        title.style.flex = '1 1 auto';
-        title.style.fontSize = '13px';
-        title.style.wordBreak = 'break-word';
-        title.ondblclick = () => {
-          const nuevo = prompt('Nuevo nombre:', title.textContent);
-          if (!nuevo) return;
-          fetch('/api/kanban/upsert', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json'},
-            body: JSON.stringify({ id: it.id, title: nuevo, lane: it.lane })
-          }).catch(()=>{});
-        };
-
-        const del = document.createElement('button');
-        del.textContent = '×';
-        del.style.border = 'none';
-        del.style.background = 'transparent';
-        del.style.cursor = 'pointer';
-        del.style.color = '#ef4444';
-        del.onclick = () => {
-          if (!confirm('¿Eliminar esta tarjeta del kanban?')) return;
-          fetch('/api/kanban/delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json'},
-            body: JSON.stringify({ id: it.id })
-          }).catch(()=>{});
-        };
-
-        card.appendChild(title);
-        card.appendChild(del);
-
-        // drag events
-        card.addEventListener('dragstart', (ev) => {
-          ev.dataTransfer.setData('text/plain', it.id);
-          ev.dataTransfer.effectAllowed = 'move';
-        });
-
-        col.appendChild(card);
-      });
-
-      // drop column
-      col.addEventListener('dragover', (ev) => {
-        ev.preventDefault();
-        ev.dataTransfer.dropEffect = 'move';
-        col.style.outline = '2px dashed #0f172a';
-      });
-      col.addEventListener('dragleave', () => {
-        col.style.outline = 'none';
-      });
-      col.addEventListener('drop', (ev) => {
-        ev.preventDefault();
-        col.style.outline = 'none';
-        const itemId = ev.dataTransfer.getData('text/plain');
-        if (!itemId) return;
-        // mandamos al server vía socket (para que rebote en todos)
-        socket.emit('kanban:move', { id: itemId, lane: laneId });
-      });
-
-      kanbanEl.appendChild(col);
-    });
-  }
-
-  // === SOCKET ===
+  // ====== SOCKET ======
   socket.on('connect', async () => {
     setStatus('Conectado al servidor');
     await reloadChats();
@@ -364,6 +246,7 @@
     }
   });
 
+  // cuando el server diga “estos son los chats visibles”, no vuelvas a mostrar los ocultos
   socket.on('chats', (chats) => {
     const arr = Array.isArray(chats) ? chats : [];
     allChats = arr.map(c => ({
@@ -374,7 +257,7 @@
     }));
     mergeAndRender();
 
-    if (currentChatId && !allChats.find(x => x.id === currentChatId)) {
+    if (currentChatId && !allChats.find(x => x.id === currentChatId) && !hiddenLocal.has(currentChatId)) {
       currentChatId = null;
       if (messagesEl) messagesEl.innerHTML = '';
       if (composerEl) composerEl.classList.add('hidden');
@@ -388,40 +271,41 @@
     }
   });
 
-  // 🔴 KANBAN SOCKET EVENTS
-  socket.on('kanban:full', (items) => {
-    kanbanItems = Array.isArray(items) ? items : [];
-    renderKanban();
-  });
-  socket.on('kanban:upsert', (item) => {
-    const idx = kanbanItems.findIndex(i => i.id === item.id);
-    if (idx === -1) kanbanItems.push(item);
-    else kanbanItems[idx] = item;
-    renderKanban();
-  });
-  socket.on('kanban:delete', ({ id }) => {
-    kanbanItems = kanbanItems.filter(it => it.id !== id);
-    renderKanban();
-  });
-
-  // 🔴 MENSAJES NUEVOS
-  socket.on('new-message', (m) => {
-    if (m.chatId === currentChatId) addMessageToView(m);
-    // si llega un mensaje de un chat que ya está en kanban, lo subimos visualmente
-    const idx = kanbanItems.findIndex(it => it.id === m.chatId);
-    if (idx !== -1) {
-      // opcional: si llega mensaje lo mandamos a "en_proceso"
-      kanbanItems[idx].lane = 'en_proceso';
-      renderKanban();
-    }
-  });
-
-  // ====== CLICK EN LISTA NORMAL ======
+  // ====== CLICK EN LISTA ======
   if (chatList) {
-    chatList.addEventListener('click', (e) => {
+    chatList.addEventListener('click', async (e) => {
+      const delBtn = e.target.closest('button[data-del]');
+      if (delBtn) {
+        const id = delBtn.dataset.del;
+        // 1) pide al server que lo olvide
+        try {
+          await fetch('/api/forget-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chatId: id })
+          });
+        } catch {}
+        // 2) y aquí lo ocultamos para SIEMPRE en este index
+        hiddenLocal.add(id);
+        // si estabas dentro de ese chat, límpialo
+        if (currentChatId === id) {
+          currentChatId = null;
+          if (messagesEl) messagesEl.innerHTML = '';
+          if (composerEl) composerEl.classList.add('hidden');
+          if (welcomeEl) welcomeEl.classList.remove('hidden');
+          try {
+            localStorage.removeItem('openChatId');
+            localStorage.removeItem('openChatName');
+          } catch {}
+        }
+        mergeAndRender();
+        return;
+      }
+
       const li = e.target.closest('li[data-chat-id]');
       if (!li) return;
       const id = li.dataset.chatId;
+      if (hiddenLocal.has(id)) return;
       const c = mergedList.find(x => x.id === id);
       openChat(id, c ? (c.name || c.id) : id);
     });
@@ -459,6 +343,7 @@
         return;
       }
       const filtered = mergedList.filter(c => {
+        if (hiddenLocal.has(c.id)) return false;
         const name = (c.name || '').toLowerCase();
         const number = (c.number || '').toLowerCase();
         const id = (c.id || '').toLowerCase();
@@ -469,3 +354,21 @@
   }
 
 })();
+async function fetchContactsOnce() {
+  if (allContacts.length) return;
+  try {
+    const res = await fetch('/api/contacts');
+    if (!res.ok) return;
+    const contacts = await res.json();
+    allContacts = (contacts || [])
+      .filter(ct => !hiddenLocal.has(ct.id)) // 👈 no reinsertes lo que el user ya borró
+      .map(ct => ({
+        id: ct.id,
+        name: ct.name || ct.number || ct.id,
+        isGroup: false,
+        number: onlyDigits(ct.number || ct.id)
+      }));
+  } catch (e) {
+    console.warn('fetch /api/contacts error:', e);
+  }
+}

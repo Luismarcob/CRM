@@ -281,3 +281,130 @@ main {
   text-align: right;
   margin-top: 3px;
 }
+.topbar {
+    position: sticky; /* o fixed si quieres que siempre esté arriba */
+    top: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 0.6rem 1.4rem;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+  }
+  .brand-icon {
+    width: 30px;
+    height: 30px;
+    background: #0ea5e9;
+    color: #fff;
+    border-radius: 9999px;
+    display: grid;
+    place-items: center;
+    font-size: 16px;
+  }
+  .brand-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: #0f172a;
+    white-space: nowrap;
+  }
+
+  .nav-links {
+    display: flex;
+    gap: .6rem;
+  }
+  .nav-link {
+    padding: .35rem .65rem;
+    border-radius: .45rem;
+    font-size: .78rem;
+    color: #0f172a;
+    text-decoration: none;
+    font-weight: 500;
+    transition: background .15s ease;
+  }
+  .nav-link:hover {
+    background: #e2e8f0;
+  }
+  .nav-link.active {
+    background: #0ea5e9;
+    color: #fff;
+  }
+
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+  }
+  .wa-status {
+    display: flex;
+    align-items: center;
+    gap: .3rem;
+    background: #ecfdf3;
+    color: #166534;
+    padding: .25rem .6rem;
+    border-radius: 9999px;
+    font-size: .7rem;
+    font-weight: 500;
+  }
+  .badge-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 9999px;
+    background: #22c55e;
+  }
+
+  .btn-live-top {
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    border-radius: .55rem;
+    padding: .4rem .9rem;
+    font-size: .78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform .1s ease;
+  }
+  .btn-live-top:hover {
+    transform: translateY(-1px);
+  }
+
+  /* Evitar que el contenido se pegue arriba si el header es fixed */
+  body { margin: 0; }
+  main { padding-top: .25rem; }
+
+  /* Responsive */
+  @media (max-width: 880px) {
+    .nav-links {
+      gap: .35rem;
+    }
+    .nav-link {
+      font-size: .7rem;
+      padding: .25rem .5rem;
+    }
+    .brand-title { font-size: .95rem; }
+  }
+
+  @media (max-width: 650px) {
+    .topbar {
+      flex-wrap: wrap;
+      gap: .6rem;
+    }
+    .topbar-left, .topbar-right {
+      width: 100%;
+      justify-content: space-between;
+    }
+  }

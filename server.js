@@ -13,7 +13,7 @@ const qrcode = require('qrcode-terminal');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 const cors = require('cors');
-const cookieParser = require('cookie-parser'); // 👈 NUEVO
+const cookieParser = require('cookie-parser'); // 👈 login
 
 // ---------- CONFIG LOGIN ----------
 const SESSION_SECRET = 'cambia-esto-por-algo-mas-largo';
@@ -129,86 +129,8 @@ function normalizeToMXWid(raw, defaultCountry = '52') {
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-function fileToMessageMedia(file, forceOgg = false) {
-  if (!file || !file.path) throw new Error('Archivo inválido');
-  const filename = file.originalname || path.basename(file.path);
-  let mimetype = file.mimetype || 'application/octet-stream';
-  const base64 = fs.readFileSync(file.path, { encoding: 'base64' });
-
-  if (forceOgg) {
-    mimetype = 'audio/ogg; codecs=opus';
-  }
-
-  return new MessageMedia(mimetype, base64, filename);
-}
 function makeTmpName(ext = '.ogg') {
   return path.join(TMP_DIR, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
-}
-function convertWebmToOggStrict(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
-      .noVideo()
-      .audioChannels(1)
-      .audioFrequency(48000)
-      .audioCodec('libopus')
-      .audioBitrate('32k')
-      .outputOptions('-vn')
-      .outputOptions('-compression_level 10')
-      .outputOptions('-application voip')
-      .format('ogg')
-      .on('end', () => resolve(outputPath))
-      .on('error', (err) => reject(err))
-      .save(outputPath);
-  });
-}
-let _sendMutex = Promise.resolve();
-function withSendMutex(task) {
-  _sendMutex = _sendMutex.then(() => task()).catch((e) => { throw e; });
-  return _sendMutex;
-}
-async function waitForReady(client, { tries = 40, delayMs = 250 } = {}) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const st = await client.getState();
-      if (st === 'CONNECTED') return true;
-    } catch {}
-    await sleep(delayMs);
-  }
-  throw new Error('WhatsApp no está CONNECTED');
-}
-async function materializeChat(client, chatId, { tries = 10, delayMs = 300 } = {}) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const chat = await client.getChatById(chatId);
-      if (chat) return chat;
-    } catch {}
-    await sleep(delayMs);
-  }
-  return null;
-}
-async function sendWithRetry(sendFn, client, chatId, { retries = 5, delayMs = 700 } = {}) {
-  let lastErr;
-  for (let i = 0; i <= retries; i++) {
-    try {
-      await waitForReady(client, { tries: 20, delayMs: 300 });
-      await materializeChat(client, chatId, { tries: 6, delayMs: 300 });
-      return await sendFn();
-    } catch (e) {
-      lastErr = e;
-      const msg = String(e && e.message ? e.message : e);
-      const retryable =
-        /Evaluation failed/i.test(msg) ||
-        /Execution context was destroyed/i.test(msg) ||
-        /not CONNECTED/i.test(msg) ||
-        /reload/i.test(msg);
-      if (retryable && i < retries) {
-        await sleep(delayMs);
-        continue;
-      }
-      break;
-    }
-  }
-  throw lastErr;
 }
 function normalizeChatIdInput(chatIdOrNumber) {
   if (!chatIdOrNumber) return null;
@@ -217,7 +139,7 @@ function normalizeChatIdInput(chatIdOrNumber) {
   return normalizeToMXWid(s);
 }
 
-// ---------- ESTADOS ----------
+// ============ ESTADOS ============
 const botTriggeredOnce = loadSetFrom(TRIGGERS_FILE);
 const hiddenChats = loadSetFrom(HIDDEN_CHATS_FILE);
 const strangerOverride = loadSetFrom(OVERRIDES_FILE);
@@ -228,28 +150,22 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
-app.use(cookieParser(SESSION_SECRET)); // 👈 para leer cookies firmadas
+app.use(cookieParser(SESSION_SECRET)); // cookies firmadas
 
 // ====== MIDDLEWARE DE AUTENTICACIÓN ======
 function requireAuth(req, res, next) {
-  // dejamos pasar el login y archivos estáticos del login
   if (req.path === '/login' || req.path === '/login.html' || req.path.startsWith('/public/login')) {
     return next();
   }
-  // permitimos también el QR del inicio de WA? → NO, solo para autenticados
   const token = req.signedCookies && req.signedCookies['auth'];
-  if (token === 'ok') {
-    return next();
-  }
-  // si no está logueado, redirigimos a login
+  if (token === 'ok') return next();
   return res.redirect('/login.html');
 }
 
-// === RUTA DE LOGIN (POST) ===
+// LOGIN
 app.post('/login', (req, res) => {
   const { username, password } = req.body || {};
   if (username === VALID_USER && password === VALID_PASS) {
-    // guardamos cookie firmada
     res.cookie('auth', 'ok', {
       httpOnly: true,
       signed: true,
@@ -259,22 +175,21 @@ app.post('/login', (req, res) => {
   }
   return res.status(401).json({ ok: false, error: 'Credenciales inválidas' });
 });
-
-// === RUTA DE LOGOUT ===
 app.post('/logout', (req, res) => {
   res.clearCookie('auth');
   res.json({ ok: true });
 });
 
-// ⚠️ A PARTIR DE AQUÍ TODO LO PRIVADO
+// 👇 todo lo demás requiere login
 app.use(requireAuth);
 
-// Servimos /public SOLO si está logueado
+// estáticos
 if (fs.existsSync(PUBLIC_DIR)) app.use(express.static(PUBLIC_DIR));
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/tmp', express.static(TMP_DIR));
+app.use('/inbox', express.static(INBOX_DIR));
 
-// ---------- ESTADO GLOBAL ----------
+// ---------- ESTADO EN MEMORIA ----------
 const state = {
   chats: new Map(),
   messages: new Map(),
@@ -282,16 +197,8 @@ const state = {
   kanbanLanes: loadJsonArray(KANBAN_LANES_FILE)
 };
 
-// ... ⬇️ AQUI SIGUE TODO TU CÓDIGO COMO LO TENÍAS
-// (eventos WhatsApp, /api/chats, /api/messages, /api/send, /api/excel-contacts, /api/kanban/...)
-// No lo reescribo completo porque es larguísimo, pero lo que cambia
-// es SOLO la parte de arriba (login + requireAuth + static después del middleware).
-// Asegúrate de pegar todo tu código original luego de esta parte.
-// :contentReference[oaicite:0]{index=0}
-
-
 // cargar tarjetas desde archivo
-const savedAssignments = loadJsonArray(KANBAN_ASSIGNMENTS_FILE); // [{id,title,lane}]
+const savedAssignments = loadJsonArray(KANBAN_ASSIGNMENTS_FILE);
 for (const it of savedAssignments) {
   if (it && it.id) {
     state.assignments.set(it.id, {
@@ -301,18 +208,13 @@ for (const it of savedAssignments) {
     });
   }
 }
-
-// helper para guardar tarjetas
 function persistAssignments() {
   const arr = Array.from(state.assignments.values());
   saveJsonArray(KANBAN_ASSIGNMENTS_FILE, arr);
 }
-
-// helper para guardar lanes
 function persistLanes() {
   saveJsonArray(KANBAN_LANES_FILE, state.kanbanLanes || []);
 }
-
 function ensureChat(chat) {
   const id = chat.id._serialized;
   if (!state.chats.has(id)) {
@@ -342,8 +244,6 @@ function pushMessage(chatId, msg) {
   if (arr.length > 200) arr.splice(0, arr.length - 200);
 }
 const visibleChatsArray = () => Array.from(state.chats.values()).filter(c => !hiddenChats.has(c.id));
-
-const botState = { enabled: false, welcome: null, rules: [] };
 
 // ---------- CLIENTE WHATSAPP ----------
 const wa = new Client({
@@ -380,7 +280,6 @@ wa.on('ready', async () => {
         }
       });
       io.emit('chats', visibleChatsArray());
-      // enviamos también el kanban y las columnas actuales
       io.emit('kanban:lanes', state.kanbanLanes || []);
       io.emit('kanban:full', Array.from(state.assignments.values()));
       console.log(`📒 Cargados ${state.chats.size} chats (filtrando ocultos).`);
@@ -390,7 +289,82 @@ wa.on('ready', async () => {
   }, 1200);
 });
 
-// ---------- MENSAJES ENTRANTES DE WHATSAPP ----------
+async function sleepWait(ms) { return sleep(ms); }
+async function waitForChat(client, chatId, { tries = 12, delayMs = 300 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const chat = await client.getChatById(chatId);
+      if (chat) return chat;
+    } catch {}
+    await sleep(delayMs);
+  }
+  throw new Error('Chat aún no disponible');
+}
+
+function findRule(rules = [], text = '') {
+  const s = String(text || '').trim();
+  for (const r of rules) {
+    if (!r) continue;
+    const type = (r.type || 'includes').toLowerCase();
+    const m = String(r.match || '');
+    try {
+      if (type === 'equals' && s.toLowerCase() === m.toLowerCase()) return r;
+      if (type === 'includes' && s.toLowerCase().includes(m.toLowerCase())) return r;
+      if (type === 'regex') {
+        const re = new RegExp(m, 'i');
+        if (re.test(s)) return r;
+      }
+    } catch (e) {
+      console.error('Regla inválida:', r, e?.message || e);
+    }
+  }
+  return null;
+}
+async function runActions(client, chatId, actions = []) {
+  const chat = await client.getChatById(chatId);
+  for (const a of (actions || [])) {
+    if (!a || !a.do) continue;
+    if (a.do === 'delay') {
+      await sleep(Number(a.ms || 0));
+      continue;
+    }
+    if (a.do === 'typing') {
+      try {
+        await chat.sendStateTyping();
+        await sleep(Number(a.ms || 800));
+        await chat.clearState();
+      } catch {}
+      continue;
+    }
+    if (a.do === 'text') {
+      await client.sendMessage(chatId, String(a.text || ''));
+      continue;
+    }
+    if (a.do === 'audio') {
+      try {
+        let media = null;
+        if (a.file && path.isAbsolute(a.file) && fs.existsSync(a.file)) media = MessageMedia.fromFilePath(a.file);
+        else if (a.file) {
+          const local = path.join(__dirname, 'public', 'media', a.file);
+          if (fs.existsSync(local)) media = MessageMedia.fromFilePath(local);
+        } else if (a.url) {
+          media = await MessageMedia.fromUrl(a.url);
+        }
+        if (!media) {
+          console.error('❌ No se pudo preparar el media de audio:', a);
+          continue;
+        }
+        await client.sendMessage(chatId, media, { sendAudioAsVoice: !!a.asVoice });
+      } catch (err) {
+        console.error('❌ Error enviando audio:', err?.message || err);
+      }
+    }
+  }
+}
+
+const botState = { enabled: false, welcome: null, rules: [] };
+
+// ---------- MENSAJES ENTRANTES ----------
 wa.on('message', async (msg) => {
   try {
     const chat = await msg.getChat();
@@ -400,6 +374,7 @@ wa.on('message', async (msg) => {
     const isMyContact = !!(contact && contact.isMyContact);
     const treatAsStranger = strangerOverride.has(chatId);
 
+    // si estaba oculto y volvió a escribir, lo volvemos a mostrar
     if (hiddenChats.has(chatId)) {
       hiddenChats.delete(chatId);
       saveSetTo(HIDDEN_CHATS_FILE, hiddenChats);
@@ -408,7 +383,7 @@ wa.on('message', async (msg) => {
     const wasNew = !state.chats.has(chatId);
     ensureChat(chat);
 
-    // ---- DESCARGAR MEDIA SI LA HAY ----
+    // ---- media entrante ----
     let mediaInfo = null;
     if (msg.hasMedia) {
       try {
@@ -477,9 +452,7 @@ wa.on('message', async (msg) => {
       (!isMyContact || treatAsStranger);
 
     if (eligible) {
-      const rules = Array.isArray(botState.rules) ? botState.rules : [];
-      const rule = findRule(rules, msg.body || '');
-
+      const rule = findRule(botState.rules, msg.body || '');
       botTriggeredOnce.add(chatId);
       saveSetTo(TRIGGERS_FILE, botTriggeredOnce);
 
@@ -498,6 +471,7 @@ wa.on('message', async (msg) => {
         io.to(chatId).emit('new-message', { chatId, ...local });
       }
     }
+
   } catch (e) {
     console.error('message handler error:', e?.message || e);
   }
@@ -515,54 +489,19 @@ wa.initialize();
 app.get('/api/ping', (_req, res) => res.json({ ok: true, t: Date.now() }));
 app.get('/api/chats', (_req, res) => res.json(visibleChatsArray()));
 
-async function waitForChat(client, chatId, { tries = 12, delayMs = 300 } = {}) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const chat = await client.getChatById(chatId);
-      if (chat) return chat;
-    } catch {}
-    await sleep(delayMs);
-  }
-  throw new Error('Chat aún no disponible');
-}
-
-// IMPORTANTE: arriba en tu server.js asegúrate de tener algo así:
-// const path = require('path');
-// const fs   = require('fs');
-// const DATA_DIR    = path.join(__dirname, 'data');
-// const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
-// if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-// if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-
-// ... y también sirves estático:
-// app.use('/data/uploads', express.static(UPLOADS_DIR));
-
 app.get('/api/messages/:chatId', async (req, res) => {
   const { chatId } = req.params;
-
   try {
-    // 1) ¿ya lo teníamos en memoria?
     let msgs = state.messages.get(chatId);
-
-    // 2) Si no hay en memoria, vamos a WhatsApp y los construimos
     if (!msgs || !msgs.length) {
       let chat = null;
-      try {
-        chat = await wa.getChatById(chatId);
-      } catch {
-        // tu helper de espera
-        try {
-          chat = await waitForChat(wa, chatId, { tries: 6, delayMs: 300 });
-        } catch {}
+      try { chat = await wa.getChatById(chatId); }
+      catch {
+        try { chat = await waitForChat(wa, chatId, { tries: 6, delayMs: 300 }); } catch {}
       }
-
       if (chat) {
         ensureChat(chat);
-
-        // Trae últimos 50 (puedes subirlo a 100 si quieres)
         const history = await chat.fetchMessages({ limit: 50 });
-
-        // Vamos mensaje por mensaje y si tiene media la descargamos
         const built = [];
         for (const m of history) {
           const baseMsg = {
@@ -572,56 +511,92 @@ app.get('/api/messages/:chatId', async (req, res) => {
             t: (m.timestamp ? m.timestamp * 1000 : Date.now()),
             fromMe: m.fromMe
           };
-
-          // ¿tiene media?
           if (m.hasMedia) {
             try {
               const media = await m.downloadMedia();
               if (media && media.data) {
-                // ejemplo: image/jpeg -> jpeg
                 const ext =
                   (media.mimetype && media.mimetype.includes('/'))
                     ? media.mimetype.split('/')[1]
                     : 'bin';
-
                 const filename = `${Date.now()}-${m.id.id}.${ext}`;
                 const filepath = path.join(UPLOADS_DIR, filename);
-
-                // guardamos el archivo binario
                 fs.writeFileSync(filepath, Buffer.from(media.data, 'base64'));
-
                 baseMsg.media = {
                   mimetype: media.mimetype,
-                  url: `/data/uploads/${filename}`,
+                  url: `/uploads/${filename}`,
                   filename
                 };
               }
             } catch (e) {
-              // si falla la descarga, igual mandamos el mensaje sin media
               console.warn('No se pudo descargar media antigua de', m.id._serialized, e.message);
             }
           }
-
           built.push(baseMsg);
         }
-
-        // Guardamos en memoria ya enriquecido
         msgs = built.sort((a, b) => a.t - b.t);
         state.messages.set(chatId, msgs);
       } else {
         msgs = [];
       }
     }
-
-    // 3) Respondemos lo que tengamos (ya con media si la había)
     res.json(msgs.sort((a, b) => a.t - b.t));
   } catch (e) {
-    console.error('GET /api/messages error', e);
     res.status(500).json({ error: e.message });
   }
 });
 
+let _sendMutex = Promise.resolve();
+function withSendMutex(task) {
+  _sendMutex = _sendMutex.then(() => task()).catch((e) => { throw e; });
+  return _sendMutex;
+}
+async function waitForReady(client, { tries = 40, delayMs = 250 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const st = await client.getState();
+      if (st === 'CONNECTED') return true;
+    } catch {}
+    await sleep(delayMs);
+  }
+  throw new Error('WhatsApp no está CONNECTED');
+}
+async function materializeChat(client, chatId, { tries = 10, delayMs = 300 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const chat = await client.getChatById(chatId);
+      if (chat) return chat;
+    } catch {}
+    await sleep(delayMs);
+  }
+  return null;
+}
+async function sendWithRetry(sendFn, client, chatId, { retries = 5, delayMs = 700 } = {}) {
+  let lastErr;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      await waitForReady(client, { tries: 20, delayMs: 300 });
+      await materializeChat(client, chatId, { tries: 6, delayMs: 300 });
+      return await sendFn();
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e && e.message ? e.message : e);
+      const retryable =
+        /Evaluation failed/i.test(msg) ||
+        /Execution context was destroyed/i.test(msg) ||
+        /not CONNECTED/i.test(msg) ||
+        /reload/i.test(msg);
+      if (retryable && i < retries) {
+        await sleep(delayMs);
+        continue;
+      }
+      break;
+    }
+  }
+  throw lastErr;
+}
 
+// ---------- ENVIAR TEXTO ----------
 app.post('/api/send', async (req, res) => {
   try {
     const { chatId, text } = req.body || {};
@@ -645,11 +620,11 @@ app.post('/api/send', async (req, res) => {
 
     res.json({ ok: true });
   } catch (e) {
-    console.error('POST /api/send error:', e);
     res.status(500).json({ error: e.message });
   }
 });
 
+// ---------- ENVIAR A CONTACTO LIBRE ----------
 app.post('/api/send-to', async (req, res) => {
   try {
     const { contactId, text } = req.body || {};
@@ -659,6 +634,7 @@ app.post('/api/send-to', async (req, res) => {
       sendWithRetry(() => wa.sendMessage(contactId, text), wa, contactId)
     );
 
+    // si lo contactas tú primero, lo forzamos como "extraño" para que el bot pueda responder después
     strangerOverride.add(contactId);
     saveSetTo(OVERRIDES_FILE, strangerOverride);
 
@@ -666,9 +642,9 @@ app.post('/api/send-to', async (req, res) => {
     try {
       chat = await waitForChat(wa, contactId, { tries: 12, delayMs: 300 });
     } catch {}
-
     if (chat) ensureChat(chat);
     else ensureChatLite(contactId);
+
     io.emit('chat-created', state.chats.get(contactId));
     io.emit('chats', visibleChatsArray());
 
@@ -678,36 +654,38 @@ app.post('/api/send-to', async (req, res) => {
 
     res.json({ ok: true, chatId: contactId, chat: state.chats.get(contactId) });
   } catch (e) {
-    console.error('POST /api/send-to error:', e);
     res.status(500).json({ error: e.message });
   }
 });
 
+// ---------- CONTACTOS WA ----------
+// ---------- CONTACTOS WA ----------
 app.get('/api/contacts', async (_req, res) => {
   try {
     const contacts = await wa.getContacts();
-    const data = contacts.map(c => ({
-      id: c.id._serialized,
-      number: c.number || c.id.user,
-      name: c.name || c.pushname || c.number || c.id.user,
-      isBusiness: !!c.isBusiness,
-      isGroup: false,
-      isMyContact: !!c.isMyContact
-    }));
+    const data = contacts
+      .map(c => ({
+        id: c.id._serialized,
+        number: c.number || c.id.user,
+        name: c.name || c.pushname || c.number || c.id.user,
+        isBusiness: !!c.isBusiness,
+        isGroup: false,
+        isMyContact: !!c.isMyContact
+      }))
+      // 👇 👇 👇 AQUÍ ES LA CLAVE
+      .filter(c => !hiddenChats.has(c.id)); // si lo "olvidaste", no lo vuelvas a mandar
     res.json(data);
   } catch (e) {
-    console.error('GET /api/contacts error:', e);
     res.status(500).json({ error: e.message });
   }
 });
 
+
 // ========= EXCEL CONTACTS API =========
-// Estructura: { id, nombre, numero, proyecto, porcentaje, dia, luis, estatus }
 app.get('/api/excel-contacts', (_req, res) => {
   const list = loadExcelContacts();
   return res.json({ ok: true, items: list });
 });
-
 app.post('/api/excel-contacts', (req, res) => {
   const body = req.body || {};
   const {
@@ -748,7 +726,6 @@ app.post('/api/excel-contacts', (req, res) => {
   saveExcelContacts(list);
   return res.json({ ok: true, item: record });
 });
-
 app.delete('/api/excel-contacts/:id', (req, res) => {
   const { id } = req.params;
   const list = loadExcelContacts();
@@ -756,13 +733,23 @@ app.delete('/api/excel-contacts/:id', (req, res) => {
   saveExcelContacts(newList);
   return res.json({ ok: true });
 });
-
 app.delete('/api/excel-contacts', (_req, res) => {
   saveExcelContacts([]);
   return res.json({ ok: true });
 });
 
 // ========= MEDIA =========
+function fileToMessageMedia(file, forceOgg = false) {
+  if (!file || !file.path) throw new Error('Archivo inválido');
+  const filename = file.originalname || path.basename(file.path);
+  let mimetype = file.mimetype || 'application/octet-stream';
+  const base64 = fs.readFileSync(file.path, { encoding: 'base64' });
+  if (forceOgg) {
+    mimetype = 'audio/ogg; codecs=opus';
+  }
+  return new MessageMedia(mimetype, base64, filename);
+}
+
 app.post('/api/send-media', upload.array('files', 10), async (req, res) => {
   try {
     const { chatId, caption } = req.body || {};
@@ -800,7 +787,6 @@ app.post('/api/send-media', upload.array('files', 10), async (req, res) => {
 
     res.json({ ok: true, sent: req.files.length });
   } catch (e) {
-    console.error('POST /api/send-media error:', e);
     const msg = String(e?.message || e);
     if (/Evaluation failed/i.test(msg) || /Execution context was destroyed/i.test(msg)) {
       return res.status(503).json({ error: 'WhatsApp Web se está recargando. Intenta de nuevo.', detail: msg });
@@ -913,7 +899,6 @@ app.post('/api/send-audio', upload.single('audio'), async (req, res) => {
 
     return res.json({ ok: true, chatId: resolvedId });
   } catch (e) {
-    console.error('POST /api/send-audio error:', e);
     const msg = String(e?.message || e);
     if (/Evaluation failed/i.test(msg) || /reload/i.test(msg)) {
       return res.status(503).json({
@@ -926,66 +911,6 @@ app.post('/api/send-audio', upload.single('audio'), async (req, res) => {
 });
 
 // ---------- BOT API ----------
-function findRule(rules = [], text = '') {
-  const s = String(text || '').trim();
-  for (const r of rules) {
-    if (!r) continue;
-    const type = (r.type || 'includes').toLowerCase();
-    const m = String(r.match || '');
-    try {
-      if (type === 'equals' && s.toLowerCase() === m.toLowerCase()) return r;
-      if (type === 'includes' && s.toLowerCase().includes(m.toLowerCase())) return r;
-      if (type === 'regex') {
-        const re = new RegExp(m, 'i');
-        if (re.test(s)) return r;
-      }
-    } catch (e) {
-      console.error('Regla inválida:', r, e?.message || e);
-    }
-  }
-  return null;
-}
-async function runActions(client, chatId, actions = []) {
-  const chat = await client.getChatById(chatId);
-  for (const a of (actions || [])) {
-    if (!a || !a.do) continue;
-    if (a.do === 'delay') {
-      await sleep(Number(a.ms || 0));
-      continue;
-    }
-    if (a.do === 'typing') {
-      try {
-        await chat.sendStateTyping();
-        await sleep(Number(a.ms || 800));
-        await chat.clearState();
-      } catch (e) {}
-      continue;
-    }
-    if (a.do === 'text') {
-      await client.sendMessage(chatId, String(a.text || ''));
-      continue;
-    }
-    if (a.do === 'audio') {
-      try {
-        let media = null;
-        if (a.file && path.isAbsolute(a.file) && fs.existsSync(a.file)) media = MessageMedia.fromFilePath(a.file);
-        else if (a.file) {
-          const local = path.join(__dirname, 'public', 'media', a.file);
-          if (fs.existsSync(local)) media = MessageMedia.fromFilePath(local);
-        } else if (a.url) {
-          media = await MessageMedia.fromUrl(a.url);
-        }
-        if (!media) {
-          console.error('❌ No se pudo preparar el media de audio:', a);
-          continue;
-        }
-        await client.sendMessage(chatId, media, { sendAudioAsVoice: !!a.asVoice });
-      } catch (err) {
-        console.error('❌ Error enviando audio:', err?.message || err);
-      }
-    }
-  }
-}
 app.post('/api/bot/upload', (req, res) => {
   try {
     const { welcome, rules } = req.body || {};
@@ -1011,7 +936,7 @@ app.get('/api/bot/status', (_req, res) => {
   res.json({ enabled: botState.enabled, rules: botState.rules?.length || 0, welcome: botState.welcome || null });
 });
 
-// ---------- Olvidar/ocultar ----------
+// ---------- Olvidar/ocultar (AQUÍ ESTÁ TU PARTE IMPORTANTE) ----------
 function resolveChatIdFromInput({ chatId, number, name }) {
   if (chatId && chatId.endsWith('@c.us')) return chatId;
   if (number) {
@@ -1042,15 +967,25 @@ app.post('/api/forget-chat', async (req, res) => {
     if (!targetId && body.number) targetId = normalizeToMXWid(body.number);
     if (!targetId) return res.status(404).json({ error: 'No se encontró ningún contacto con ese nombre, número o chatId' });
 
-    hiddenChats.add(targetId); saveSetTo(HIDDEN_CHATS_FILE, hiddenChats);
-    botTriggeredOnce.delete(targetId); saveSetTo(TRIGGERS_FILE, botTriggeredOnce);
-    strangerOverride.add(targetId); saveSetTo(OVERRIDES_FILE, strangerOverride);
+    // 1. lo ocultamos
+    hiddenChats.add(targetId); 
+    saveSetTo(HIDDEN_CHATS_FILE, hiddenChats);
 
+    // 2. reseteamos el bot para ese número
+    botTriggeredOnce.delete(targetId); 
+    saveSetTo(TRIGGERS_FILE, botTriggeredOnce);
+
+    // 3. FORZAMOS que aunque WhatsApp lo tenga en contactos, lo tratemos como extraño
+    strangerOverride.add(targetId); 
+    saveSetTo(OVERRIDES_FILE, strangerOverride);
+
+    // 4. limpiamos cache en memoria
     state.chats.delete(targetId);
     state.messages.delete(targetId);
     state.assignments.delete(targetId);
     persistAssignments();
 
+    // 5. refrescamos a todos los clientes
     io.emit('chats', visibleChatsArray());
     io.emit('kanban:full', Array.from(state.assignments.values()));
 
@@ -1059,6 +994,7 @@ app.post('/api/forget-chat', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
 app.get('/api/forget-chat', async (req, res) => {
   try {
     let { chatId, number } = req.query || {};
@@ -1108,45 +1044,14 @@ app.post('/api/remove-number', async (req, res) => {
   }
 });
 
-// ---------- Overrides ----------
-app.post('/api/mark-stranger', (req, res) => {
-  try {
-    const targetId = resolveChatIdFromInput(req.body || {});
-    if (!targetId) return res.status(404).json({ error: 'No se encontró el contacto' });
-    strangerOverride.add(targetId);
-    saveSetTo(OVERRIDES_FILE, strangerOverride);
-    return res.json({ ok: true, chatId: targetId, status: 'marked' });
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
-  }
-});
-app.post('/api/unmark-stranger', (req, res) => {
-  try {
-    const targetId = resolveChatIdFromInput(req.body || {});
-    if (!targetId) return res.status(404).json({ error: 'No se encontró el contacto' });
-    strangerOverride.delete(targetId);
-    saveSetTo(OVERRIDES_FILE, strangerOverride);
-    return res.json({ ok: true, chatId: targetId, status: 'unmarked' });
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
-  }
-});
-app.get('/api/overrides', (_req, res) => {
-  res.json({ count: strangerOverride.size, list: Array.from(strangerOverride) });
-});
-
-// ====== KANBAN API (tarjetas) ======
+// ====== KANBAN API ======
 app.get('/api/kanban', (_req, res) => {
   res.json({ ok: true, items: Array.from(state.assignments.values()) });
 });
 app.post('/api/kanban/upsert', (req, res) => {
   const { id, title, lane } = req.body || {};
   if (!id) return res.status(400).json({ error: 'Falta id' });
-  const item = {
-    id,
-    title: title || id,
-    lane: lane || null
-  };
+  const item = { id, title: title || id, lane: lane || null };
   state.assignments.set(id, item);
   persistAssignments();
   io.emit('kanban:upsert', item);
@@ -1160,8 +1065,6 @@ app.post('/api/kanban/delete', (req, res) => {
   io.emit('kanban:delete', { id });
   return res.json({ ok: true });
 });
-
-// ====== KANBAN API (columnas) ======
 app.get('/api/kanban/lanes', (_req, res) => {
   return res.json({ ok: true, lanes: state.kanbanLanes || [] });
 });
@@ -1195,12 +1098,10 @@ app.post('/api/kanban/lanes/delete', (req, res) => {
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ error: 'Falta id' });
 
-    // 1) quitar columna
     const lanes = (state.kanbanLanes || []).filter(l => l.id !== id);
     state.kanbanLanes = lanes;
     persistLanes();
 
-    // 2) quitar tarjetas que estaban en esa columna
     for (const [key, val] of state.assignments.entries()) {
       if (val.lane === id) {
         state.assignments.delete(key);
@@ -1233,8 +1134,6 @@ io.on('connection', (socket) => {
   }).catch(() => {});
   socket.on('join-chat', (chatId) => socket.join(chatId));
   socket.on('leave-chat', (chatId) => socket.leave(chatId));
-
-  // kanban: mover tarjeta (drag & drop)
   socket.on('kanban:move', (payload) => {
     const { id, lane } = payload || {};
     if (!id || !lane) return;
@@ -1245,7 +1144,6 @@ io.on('connection', (socket) => {
     persistAssignments();
     io.emit('kanban:upsert', item);
   });
-
   socket.on('disconnect', () => console.log('👤 Panel desconectado'));
 });
 
